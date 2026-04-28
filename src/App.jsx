@@ -150,19 +150,13 @@ export default function App() {
     }, 5000)
 
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 2000,
-          temperature: 0,
-          system: SYSTEM_PROMPT,
-          messages: [{ role: 'user', content: buildPrompt(extractedText) }]
-        })
-      })
-      const data = await res.json()
-      const text = data.content.map(i => i.text || '').join('')
+      const res = await fetch('/api/score', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ prompt: buildPrompt(extractedText) })
+})
+const data = await res.json()
+const text = data.content.map(i => i.text || '').join('')
       const clean = text.replace(/```json|```/g, '').trim()
       const parsed = JSON.parse(clean)
 
