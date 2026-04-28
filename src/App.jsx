@@ -17,14 +17,6 @@ const CRITERIA = [
     desc: '10分=改善措施已實際導入，於相關人員或單位穩定執行，具持續追蹤機制；5分=已部分實施，效果初顯，仍需持續推進；3分=尚未實施、執行困難或僅停留於提案。' },
 ]
 
-const SYSTEM_PROMPT = `你是「華美光學科技股份有限公司」的提案改善評審委員。
-請依照公司 FM-10-3-1-1 提案改善簡報表的 7 項評分標準，對提案報告進行客觀、嚴謹的初評。
-評分規則：
-- 每個項目只能給 3、5、10 三個分數之一
-- 評分必須客觀，同樣的報告每次評分結果應一致
-- 使用繁體中文
-- 只回傳 JSON，不含任何其他文字或 markdown`
-
 function buildPrompt(reportText) {
   const criteriaText = CRITERIA.map(c =>
     `${c.id}. ${c.name}（權重${Math.round(c.weight * 100)}%）：${c.desc}`
@@ -32,7 +24,7 @@ function buildPrompt(reportText) {
 
   return `請評分以下提案改善報告。
 
-評分標準（每項只能給 3、5、10 分之一）：
+評分標準（每項只能給 3、5、10 分之一，不可給其他分數）：
 ${criteriaText}
 
 報告內容：
@@ -45,37 +37,23 @@ ${reportText.substring(0, 8000)}
     {
       "id": 1,
       "score": 數字,
-      "reason": "為何給此分數的具體說明（2句）",
+      "reason": "為何給此分數的具體說明（2-3句，具體引用報告內容）",
       "pros": ["優點1", "優點2"],
       "cons": ["可加強之處1", "可加強之處2"],
       "suggestion": "具體改進建議，說明如何提升分數"
-    }
+    },
+    {"id": 2, "score": 數字, "reason": "...", "pros": [], "cons": [], "suggestion": "..."},
+    {"id": 3, "score": 數字, "reason": "...", "pros": [], "cons": [], "suggestion": "..."},
+    {"id": 4, "score": 數字, "reason": "...", "pros": [], "cons": [], "suggestion": "..."},
+    {"id": 5, "score": 數字, "reason": "...", "pros": [], "cons": [], "suggestion": "..."},
+    {"id": 6, "score": 數字, "reason": "...", "pros": [], "cons": [], "suggestion": "..."},
+    {"id": 7, "score": 數字, "reason": "...", "pros": [], "cons": [], "suggestion": "..."}
   ]
 }`
 }
 
-async function extractPdfText(file) {
-  const pdfjsLib = await import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js')
-  if (typeof window !== 'undefined') {
-    const script = document.createElement('script')
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'
-    await new Promise((resolve) => { script.onload = resolve; document.head.appendChild(script) })
-  }
-  const pdfjs = window['pdfjs-dist/build/pdf'] || window.pdfjsLib
-  pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
-  const arrayBuffer = await file.arrayBuffer()
-  const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise
-  let text = ''
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i)
-    const content = await page.getTextContent()
-    text += `\n[第${i}頁]\n` + content.items.map(item => item.str).join(' ')
-  }
-  return text.trim()
-}
-
 export default function App() {
-  const [phase, setPhase] = useState('upload') // upload | loading | result
+  const [phase, setPhase] = useState('upload')
   const [dragOver, setDragOver] = useState(false)
   const [file, setFile] = useState(null)
   const [previewText, setPreviewText] = useState('')
@@ -86,7 +64,8 @@ export default function App() {
   const fileRef = useRef()
 
   const handleFile = async (f) => {
-    if (!f || !f.name.toLowerCase().endsWith('.pdf')) {
+    if (!f) return
+    if (!f.name.toLowerCase().endsWith('.pdf')) {
       setError('請上傳 PDF 格式的檔案（可將 PPT 另存為 PDF）')
       return
     }
@@ -94,8 +73,8 @@ export default function App() {
     setFile(f)
     setLoadingMsg('讀取 PDF 中...')
     setPhase('loading')
+
     try {
-      // 動態載入 pdfjs
       await new Promise((resolve, reject) => {
         if (window.pdfjsLib) return resolve()
         const s = document.createElement('script')
@@ -147,18 +126,18 @@ export default function App() {
     const timer = setInterval(() => {
       idx = Math.min(idx + 1, msgs.length - 1)
       setLoadingMsg(msgs[idx])
-    }, 5000)
+    }, 6000)
 
     try {
       const res = await fetch('/api/score', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ prompt: buildPrompt(extractedText) })
-})
-const data = await res.json()
-const text = data.content.map(i => i.text || '').join('')
-      const clean = text.replace(/```json|```/g, '').trim()
-      const parsed = JSON.parse(clean)
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: buildPrompt(extractedText) })
+      })
+
+      const parsed = await res.json()
+
+      if (parsed.error) throw new Error(parsed.error)
 
       let weighted = 0
       CRITERIA.forEach(c => {
@@ -188,7 +167,6 @@ const text = data.content.map(i => i.text || '').join('')
 
   return (
     <div style={{ minHeight: '100vh', background: '#f0ede8' }}>
-      {/* Header */}
       <div style={{ background: '#1a1a1a', color: '#fff', padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <div style={{ fontSize: 11, opacity: 0.5, letterSpacing: 1 }}>華美光學科技股份有限公司</div>
@@ -199,11 +177,10 @@ const text = data.content.map(i => i.text || '').join('')
 
       <div style={{ maxWidth: 800, margin: '0 auto', padding: '2rem 1.5rem 4rem' }}>
 
-        {/* Upload Phase */}
         {phase === 'upload' && (
           <>
             <div style={{ fontSize: 12, color: '#888', background: '#fff', borderRadius: 10, padding: '8px 14px', marginBottom: 16, lineHeight: 1.7 }}>
-              <strong style={{ color: '#555' }}>使用說明：</strong>上傳提案改善報告 PDF，AI 將依 7 項評分標準進行初評，每份報告評分結果一致，約 20～40 秒完成。PPT 請先另存為 PDF。
+              <strong style={{ color: '#555' }}>使用說明：</strong>上傳提案改善報告 PDF，AI 將依 7 項評分標準進行初評。每份報告評分結果一致，約 20～40 秒完成。PPT 請先另存為 PDF。
             </div>
 
             <div
@@ -240,7 +217,7 @@ const text = data.content.map(i => i.text || '').join('')
               <div style={{ background: '#fcebeb', color: '#a32d2d', borderRadius: 8, padding: '10px 14px', fontSize: 13, marginBottom: 12 }}>{error}</div>
             )}
 
-            {extractedText && (
+            {extractedText ? (
               <div style={{ display: 'flex', gap: 10 }}>
                 <button onClick={startScoring} style={{ flex: 1, padding: '12px', fontSize: 15, fontWeight: 500, background: '#1a1a1a', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer' }}>
                   開始 AI 評分
@@ -249,9 +226,7 @@ const text = data.content.map(i => i.text || '').join('')
                   重新上傳
                 </button>
               </div>
-            )}
-
-            {!extractedText && (
+            ) : (
               <button disabled style={{ width: '100%', padding: '12px', fontSize: 15, fontWeight: 500, background: '#1a1a1a', color: '#fff', border: 'none', borderRadius: 8, opacity: 0.3, cursor: 'not-allowed' }}>
                 上傳檔案後開始 AI 評分
               </button>
@@ -259,7 +234,6 @@ const text = data.content.map(i => i.text || '').join('')
           </>
         )}
 
-        {/* Loading Phase */}
         {phase === 'loading' && (
           <div style={{ textAlign: 'center', padding: '4rem 1rem' }}>
             <div style={{ width: 36, height: 36, border: '2px solid #ddd', borderTopColor: '#1a1a1a', borderRadius: '50%', animation: 'spin 0.7s linear infinite', margin: '0 auto 16px' }} />
@@ -269,23 +243,20 @@ const text = data.content.map(i => i.text || '').join('')
           </div>
         )}
 
-        {/* Result Phase */}
         {phase === 'result' && result && (
           <>
-            {/* 總分卡片 */}
             <div style={{ background: '#1a1a1a', color: '#fff', borderRadius: 12, padding: '1.5rem', marginBottom: 16 }}>
               <div style={{ fontSize: 12, opacity: 0.5, marginBottom: 4 }}>{file?.name}</div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 }}>
-                <div style={{ fontSize: 16, fontWeight: 500 }}>{result.theme || '提案改善報告'}</div>
-                <div style={{ fontSize: 42, fontWeight: 500, lineHeight: 1 }}>
+                <div style={{ fontSize: 16, fontWeight: 500, flex: 1, marginRight: 16 }}>{result.theme || '提案改善報告'}</div>
+                <div style={{ fontSize: 42, fontWeight: 500, lineHeight: 1, flexShrink: 0 }}>
                   {result.totalScore}
                   <span style={{ fontSize: 16, opacity: 0.5, fontWeight: 400 }}> / 10</span>
                 </div>
               </div>
               <div style={{ width: '100%', height: 6, background: 'rgba(255,255,255,0.15)', borderRadius: 99, overflow: 'hidden' }}>
-                <div style={{ width: `${parseFloat(result.totalScore) * 10}%`, height: '100%', background: '#fff', borderRadius: 99, transition: 'width 1s ease' }} />
+                <div style={{ width: `${parseFloat(result.totalScore) * 10}%`, height: '100%', background: '#fff', borderRadius: 99 }} />
               </div>
-              {/* 各項分數快覽 */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 14 }}>
                 {CRITERIA.map(c => {
                   const s = result.scores.find(x => x.id === c.id)
@@ -298,7 +269,6 @@ const text = data.content.map(i => i.text || '').join('')
               </div>
             </div>
 
-            {/* 各項目詳細評分 */}
             {CRITERIA.map(c => {
               const s = result.scores.find(x => x.id === c.id)
               if (!s) return null
@@ -315,23 +285,21 @@ const text = data.content.map(i => i.text || '').join('')
                     <span style={{ background: badgeBg, color: badgeColor, fontSize: 13, fontWeight: 500, padding: '3px 12px', borderRadius: 99 }}>{s.score} 分</span>
                   </div>
                   <div style={{ width: '100%', height: 4, background: '#f0ede8', borderRadius: 99, overflow: 'hidden', marginBottom: 14 }}>
-                    <div style={{ width: `${pct}%`, height: '100%', background: c.color, borderRadius: 99, transition: 'width 0.8s ease' }} />
+                    <div style={{ width: `${pct}%`, height: '100%', background: c.color, borderRadius: 99 }} />
                   </div>
 
-                  {/* 評分理由 */}
                   <div style={{ marginBottom: 10 }}>
                     <div style={{ fontSize: 11, fontWeight: 500, color: '#185FA5', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>評分理由</div>
                     <div style={{ fontSize: 13, color: '#555', background: '#f7f5f2', borderRadius: 8, padding: '8px 10px', lineHeight: 1.65 }}>{s.reason}</div>
                   </div>
 
-                  {/* 優點 */}
                   {s.pros?.length > 0 && (
                     <div style={{ marginBottom: 10 }}>
                       <div style={{ fontSize: 11, fontWeight: 500, color: '#0F6E56', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>優點</div>
                       <div style={{ fontSize: 13, color: '#555', background: '#f7f5f2', borderRadius: 8, padding: '8px 10px', lineHeight: 1.65 }}>
                         {s.pros.map((p, i) => (
-                          <div key={i} style={{ display: 'flex', gap: 8, marginBottom: i < s.pros.length - 1 ? 4 : 0 }}>
-                            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#1D9E75', flexShrink: 0, marginTop: 6 }} />
+                          <div key={i} style={{ display: 'flex', gap: 8, marginBottom: i < s.pros.length - 1 ? 6 : 0 }}>
+                            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#1D9E75', flexShrink: 0, marginTop: 7 }} />
                             <span>{p}</span>
                           </div>
                         ))}
@@ -339,14 +307,13 @@ const text = data.content.map(i => i.text || '').join('')
                     </div>
                   )}
 
-                  {/* 可加強之處 */}
                   {s.cons?.length > 0 && (
                     <div style={{ marginBottom: 10 }}>
                       <div style={{ fontSize: 11, fontWeight: 500, color: '#A32D2D', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>可加強之處</div>
                       <div style={{ fontSize: 13, color: '#555', background: '#f7f5f2', borderRadius: 8, padding: '8px 10px', lineHeight: 1.65 }}>
                         {s.cons.map((p, i) => (
-                          <div key={i} style={{ display: 'flex', gap: 8, marginBottom: i < s.cons.length - 1 ? 4 : 0 }}>
-                            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#E24B4A', flexShrink: 0, marginTop: 6 }} />
+                          <div key={i} style={{ display: 'flex', gap: 8, marginBottom: i < s.cons.length - 1 ? 6 : 0 }}>
+                            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#E24B4A', flexShrink: 0, marginTop: 7 }} />
                             <span>{p}</span>
                           </div>
                         ))}
@@ -354,13 +321,12 @@ const text = data.content.map(i => i.text || '').join('')
                     </div>
                   )}
 
-                  {/* 改進建議 */}
                   {s.suggestion && (
                     <div>
                       <div style={{ fontSize: 11, fontWeight: 500, color: '#854F0B', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>改進建議</div>
                       <div style={{ fontSize: 13, color: '#555', background: '#f7f5f2', borderRadius: 8, padding: '8px 10px', lineHeight: 1.65 }}>
                         <div style={{ display: 'flex', gap: 8 }}>
-                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#BA7517', flexShrink: 0, marginTop: 6 }} />
+                          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#BA7517', flexShrink: 0, marginTop: 7 }} />
                           <span>{s.suggestion}</span>
                         </div>
                       </div>
@@ -384,4 +350,3 @@ const text = data.content.map(i => i.text || '').join('')
     </div>
   )
 }
-
